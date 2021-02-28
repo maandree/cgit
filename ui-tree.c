@@ -84,7 +84,62 @@ static void print_binary_buffer(char *buf, unsigned long size)
 	html("</table>\n");
 }
 
-static void print_object(const struct object_id *oid, const char *path, const char *basename, const char *rev)
+static int link_is_valid(const char *path, const char *target)
+{
+	size_t depth = 0;
+	const char *p;
+
+	if (target[0] == '/' || !target[0])
+		return 0;
+
+	for (p = path; *p;) {
+		while (*p == '/')
+			p++;
+		if (p[0] == '.' && (p[1] == '/' || !p[1])) {
+			if (!p[1])
+				break;
+			p = &p[2];
+		} else if (p[0] == '.' && p[1] == '.' && (p[2] == '/' || !p[2])) {
+			if (!depth--)
+				return 0;
+			if (!p[2])
+				break;
+			p = &p[3];
+		} else if (p[0]) {
+			while (*p && *p != '/')
+				p++;
+			depth += 1;
+		}
+	}
+
+	if (!depth--)
+		return 0;
+
+	for (p = target; *p;) {
+		while (*p == '/')
+			p++;
+		if (p[0] == '.' && (p[1] == '/' || !p[1])) {
+			if (!p[1])
+				break;
+			p = &p[2];
+		} else if (p[0] == '.' && p[1] == '.' && (p[2] == '/' || !p[2])) {
+			if (!depth--)
+				return 0;
+			if (!p[2])
+				break;
+			p = &p[3];
+		} else if (p[0]) {
+			while (*p && *p != '/')
+				p++;
+			depth += 1;
+		}
+	}
+
+	return 1;
+}
+
+static void print_object(const struct object_id *oid, const char *path, const char *basename,
+			 const char *rev, unsigned mode)
 {
 	enum object_type type;
 	char *buf;
@@ -114,6 +169,11 @@ static void print_object(const struct object_id *oid, const char *path, const ch
 		html(") (");
 		cgit_blame_link("blame", NULL, NULL, ctx.qry.head,
 			        rev, path);
+	}
+	if (S_ISLNK(mode) && !buffer_is_binary(buf, size) && link_is_valid(path, buf)) {
+		html(") (");
+		cgit_tree_link("target", NULL, NULL, ctx.qry.head,
+			       rev, buf);
 	}
 	html(")\n");
 
@@ -321,7 +381,8 @@ static int walk_tree(const struct object_id *oid, struct strbuf *base,
 			return READ_TREE_RECURSIVE;
 		} else {
 			walk_tree_ctx->state = 2;
-			print_object(oid, buffer.buf, pathname, walk_tree_ctx->curr_rev);
+			print_object(oid, buffer.buf, pathname,
+			             walk_tree_ctx->curr_rev, mode);
 			strbuf_release(&buffer);
 			return 0;
 		}
